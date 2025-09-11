@@ -1,5 +1,5 @@
 from db import SessionLocal, User
-from main import tg  # reutilizamos la función de enviar mensajes
+from telegram_utils import tg   # ahora limpio, sin circular import
 
 # --- Teclados de opciones ---
 def kb_sexo():
@@ -15,7 +15,7 @@ def kb_actividad():
         [{"text":"Ligero","callback_data":"act_ligero"}],
         [{"text":"Moderado","callback_data":"act_moderado"}],
         [{"text":"Alto","callback_data":"act_alto"}],
-        [{"text":"Muy alto","callback_data":"act_muy_alto"}]
+        [{"text":"Muy alto","callback_data":"act_muy_alta"}]
     ]}
 
 def kb_objetivo_detallado():

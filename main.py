@@ -1,37 +1,35 @@
-import os, httpx
+import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-from db import init_db, SessionLocal, User, MenuLog
+from db import init_db, SessionLocal, User
 from prompts import SYSTEM_PROMPT, USER_GUIDANCE, COACH_STYLE_SUFFIX
-from onboarding import start_onboarding, ask_next  # nuevas funciones
+from onboarding import start_onboarding, ask_next
+from telegram_utils import tg   # ✅ import limpio, no circular
 
 load_dotenv()
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
 
-TG_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-
 app = FastAPI()
 init_db()
 
-# ---------- Telegram ----------
-async def tg(method: str, payload: dict):
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(f"{TG_API}/{method}", json=payload)
-        r.raise_for_status()
-        return r.json()
-
 # ---------- OpenAI ----------
+import httpx
+
 async def call_openai(messages):
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type":"application/json"}
-    body = {"model": OPENAI_MODEL, "temperature": OPENAI_TEMPERATURE, "messages": messages, "max_tokens": 500}
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    body = {
+        "model": OPENAI_MODEL,
+        "temperature": OPENAI_TEMPERATURE,
+        "messages": messages,
+        "max_tokens": 500
+    }
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=body)
         r.raise_for_status()
@@ -117,8 +115,8 @@ async def telegram_webhook(request: Request):
             else:
                 # Chat libre al coach
                 messages = [
-                    {"role":"system","content": SYSTEM_PROMPT},
-                    {"role":"user","content": f"Usuario pregunta: {text}\n{COACH_STYLE_SUFFIX}\n{USER_GUIDANCE}"}
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": f"Usuario pregunta: {text}\n{COACH_STYLE_SUFFIX}\n{USER_GUIDANCE}"}
                 ]
                 reply = await call_openai(messages)
                 await tg("sendMessage", {"chat_id": chat_id, "text": reply})
@@ -133,26 +131,25 @@ async def telegram_webhook(request: Request):
             u = get_user(s, chat_id) or User(chat_id=str(chat_id))
 
             if data.startswith("sexo_"):
-                u.sexo = data.split("_",1)[1]; u.onboarding_step = 2
+                u.sexo = data.split("_", 1)[1]; u.onboarding_step = 2
             elif data.startswith("act_"):
-                u.actividad = data.split("_",1)[1]; u.onboarding_step = 6
+                u.actividad = data.split("_", 1)[1]; u.onboarding_step = 6
             elif data.startswith("obj_"):
-                # map objetivos detallados
                 mapping = {
-                    "grasa":"perder grasa","musculo":"ganar músculo","abdomen":"definir abdomen",
-                    "mente":"mente tranquila","keto":"desinflamar","cardio":"mejorar cardio",
-                    "energia":"subir energía","sueno":"dormir mejor"
+                    "grasa": "perder grasa", "musculo": "ganar músculo", "abdomen": "definir abdomen",
+                    "mente": "mente tranquila", "keto": "desinflamar", "cardio": "mejorar cardio",
+                    "energia": "subir energía", "sueno": "dormir mejor"
                 }
-                key = data.split("_",1)[1]
+                key = data.split("_", 1)[1]
                 u.objetivo_detallado = mapping.get(key, key); u.onboarding_step = 7
             elif data.startswith("dieta_"):
-                u.estilo_dieta = data.split("_",1)[1]; u.onboarding_step = 8
+                u.estilo_dieta = data.split("_", 1)[1]; u.onboarding_step = 8
             elif data.startswith("cook_"):
-                mapping = {"15":"≤15","30":"~30","45":">45"}
-                key = data.split("_",1)[1]
+                mapping = {"15": "≤15", "30": "~30", "45": ">45"}
+                key = data.split("_", 1)[1]
                 u.tiempo_cocina = mapping.get(key, key); u.onboarding_step = 11
             elif data.startswith("equip_"):
-                eq = data.split("_",1)[1]
+                eq = data.split("_", 1)[1]
                 u.equipamiento = eq if eq != "none" else "ninguno"; u.onboarding_step = 12
 
             s.add(u); s.commit()
@@ -164,6 +161,7 @@ async def telegram_webhook(request: Request):
 
 @app.on_event("startup")
 async def set_webhook():
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     if not PUBLIC_BASE_URL or not TELEGRAM_BOT_TOKEN:
         return
     await tg("setWebhook", {
