@@ -1,11 +1,11 @@
-import os, json, httpx
+import os, httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-from nutrition import mifflin_st_jeor, tdee, objetivo_kcal, calcular_macros, plantilla_plan_dia
-from db import init_db, SessionLocal, User, CheckIn, MenuLog
+from db import init_db, SessionLocal, User, MenuLog
 from prompts import SYSTEM_PROMPT, USER_GUIDANCE, COACH_STYLE_SUFFIX
+from onboarding import start_onboarding, ask_next  # nuevas funciones
 
 load_dotenv()
 
@@ -28,26 +28,10 @@ async def tg(method: str, payload: dict):
         r.raise_for_status()
         return r.json()
 
-def kb_main():
-    return {
-        "inline_keyboard": [[
-            {"text":"📊 Calcular macros","callback_data":"macros"},
-            {"text":"🥗 Menú 3 días","callback_data":"menu3"}
-        ],[
-            {"text":"✅ Check-in diario","callback_data":"checkin"},
-            {"text":"ℹ️ Ayuda","callback_data":"help"}
-        ]]
-    }
-
 # ---------- OpenAI ----------
 async def call_openai(messages):
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type":"application/json"}
-    body = {
-        "model": OPENAI_MODEL,
-        "temperature": OPENAI_TEMPERATURE,
-        "messages": messages,
-        "max_tokens": 500
-    }
+    body = {"model": OPENAI_MODEL, "temperature": OPENAI_TEMPERATURE, "messages": messages, "max_tokens": 500}
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=body)
         r.raise_for_status()
@@ -56,66 +40,40 @@ async def call_openai(messages):
 
 # ---------- Funciones de negocio ----------
 def get_user(session, chat_id: str) -> User | None:
-    return session.query(User).filter(User.chat_id==str(chat_id)).first()
+    return session.query(User).filter(User.chat_id == str(chat_id)).first()
 
-async def ensure_onboarded(chat_id: str):
+async def handle_onboarding_text(chat_id: str, text: str):
+    """Procesa respuestas libres en el onboarding"""
     with SessionLocal() as s:
         u = get_user(s, chat_id)
-        if not u or not (u.sexo and u.edad and u.altura_cm and u.peso_kg):
-            await tg("sendMessage", {"chat_id": chat_id,
-                "text":"Necesito tus datos básicos. Envíame este formato:\n\n"
-                       "Sexo (M/F):\nEdad:\nAltura (cm):\nPeso (kg):\nActividad (sedentaria/ligera/moderada/alta/muy alta):\nObjetivo (perder/mantener/ganar):\nAlergias/Vetos:\nEquipamiento (ej. air fryer):\nTiempo cocina (min):",
-                "reply_markup": {"inline_keyboard":[[{"text":"Abrir menú","callback_data":"menu"}]]}
-            })
-            return False
-    return True
+        if not u:
+            return await start_onboarding(chat_id)
 
-# ---------- Handlers de comandos ----------
-async def do_macros(chat_id: str):
-    with SessionLocal() as s:
-        u = get_user(s, chat_id)
-        if not u: return await ensure_onboarded(chat_id)
-        bmr = mifflin_st_jeor(u.sexo, u.peso_kg, u.altura_cm, u.edad)
-        tdee_val = tdee(bmr, u.actividad)
-        kcal_obj = objetivo_kcal(tdee_val, u.objetivo)
-        m = calcular_macros(u.peso_kg, kcal_obj)
-    text = (f"Objetivo diario:\n"
-            f"• Calorías: {m['kcal']} kcal\n"
-            f"• Proteínas: {m['prote_g']} g\n"
-            f"• Grasas: {m['grasa_g']} g\n"
-            f"• Carbos: {m['carbo_g']} g\n")
-    await tg("sendMessage", {"chat_id": chat_id, "text": text})
+        step = u.onboarding_step or 1
+        t = text.strip()
 
-async def do_menu3(chat_id: str):
-    with SessionLocal() as s:
-        u = get_user(s, chat_id)
-        if not u: return await ensure_onboarded(chat_id)
-        bmr = mifflin_st_jeor(u.sexo, u.peso_kg, u.altura_cm, u.edad)
-        kcal = round(objetivo_kcal(tdee(bmr, u.actividad), u.objetivo))
-    dias = [plantilla_plan_dia(kcal) for _ in range(3)]
-    menu = {"kcal_obj": kcal, "dias": dias}
-    with SessionLocal() as s:
-        s.add(MenuLog(chat_id=str(chat_id), params={"kcal":kcal}, menu_json=menu))
-        s.commit()
-    chunks = [f"Menú 3 días (~{kcal} kcal/día):"]
-    for i, d in enumerate(dias, 1):
-        chunks.append(
-            f"\nDía {i}:\n• Des: {d['desayuno']}\n• Com: {d['comida']}\n• Cen: {d['cena']}\n• Snack: {d['snack']}"
-        )
-    await tg("sendMessage", {"chat_id": chat_id, "text": "\n".join(chunks)})
+        try:
+            if step == 2:   # edad
+                u.edad = int(t)
+            elif step == 3: # altura
+                u.altura_cm = int(float(t))
+            elif step == 4: # peso
+                u.peso_kg = float(t.replace(",", "."))
+            elif step == 8: # no_gustos
+                u.no_gustos = t
+            elif step == 9: # alergias
+                u.alergias = t
+            elif step == 12: # duración plan
+                u.duracion_plan_semanas = int(t)
+            else:
+                return await ask_next(chat_id)
 
-async def handle_free_text(chat_id: str, text: str):
-    with SessionLocal() as s:
-        u = get_user(s, chat_id)
-    perfil = (f"Perfil: {u.sexo if u else '?'} {u.edad if u else '?'}a, {u.altura_cm if u else '?'}cm, {u.peso_kg if u else '?'}kg, "
-              f"actividad {u.actividad if u else '?'}, objetivo {u.objetivo if u else '?'}, equipamiento {u.equipamiento if u else '-'}.")
+            u.onboarding_step = step + 1
+            s.add(u); s.commit()
+        except Exception:
+            return await tg("sendMessage", {"chat_id": chat_id, "text": "⚠️ Formato no válido. Intenta de nuevo."})
 
-    messages = [
-        {"role":"system","content": SYSTEM_PROMPT},
-        {"role":"user","content": f"{perfil}\nPregunta: {text}\n{COACH_STYLE_SUFFIX}\n{USER_GUIDANCE}"}
-    ]
-    reply = await call_openai(messages)
-    await tg("sendMessage", {"chat_id": chat_id, "text": reply})
+    await ask_next(chat_id)
 
 # ---------- Endpoints ----------
 @app.get("/health")
@@ -129,37 +87,85 @@ async def telegram_webhook(request: Request):
 
     update = await request.json()
 
+    # --- Mensajes normales ---
     if "message" in update:
         msg = update["message"]
         chat_id = msg["chat"]["id"]
         text = msg.get("text", "")
 
         if text.startswith("/start"):
-            await tg("sendMessage", {"chat_id": chat_id, "text": "¡Hola! Soy NutriCoach 🤝", "reply_markup": kb_main()})
-        elif text.startswith("/macros"):
-            await do_macros(chat_id)
-        elif text.startswith("/menu"):
-            await do_menu3(chat_id)
+            await start_onboarding(chat_id)
+        elif text.startswith("/plan"):
+            with SessionLocal() as s:
+                u = get_user(s, chat_id)
+            if not u:
+                await start_onboarding(chat_id)
+            else:
+                plan = (f"🎯 Plan actual:\n"
+                        f"Objetivo: {u.objetivo_detallado or '-'}\n"
+                        f"Dieta: {u.estilo_dieta or '-'}\n"
+                        f"Duración: {u.duracion_plan_semanas or '-'} semanas\n"
+                        f"Tiempo de cocina: {u.tiempo_cocina or '-'}\n"
+                        f"Equipamiento: {u.equipamiento or '-'}\n"
+                        f"Kcal objetivo: {u.kcal_objetivo or '-'}\n")
+                await tg("sendMessage", {"chat_id": chat_id, "text": plan})
         else:
-            await handle_free_text(chat_id, text)
+            with SessionLocal() as s:
+                u = get_user(s, chat_id)
+            if u and (u.onboarding_step or 0) > 0:
+                await handle_onboarding_text(chat_id, text)
+            else:
+                # Chat libre al coach
+                messages = [
+                    {"role":"system","content": SYSTEM_PROMPT},
+                    {"role":"user","content": f"Usuario pregunta: {text}\n{COACH_STYLE_SUFFIX}\n{USER_GUIDANCE}"}
+                ]
+                reply = await call_openai(messages)
+                await tg("sendMessage", {"chat_id": chat_id, "text": reply})
 
+    # --- Callbacks de botones ---
     elif "callback_query" in update:
         cq = update["callback_query"]
         chat_id = cq["message"]["chat"]["id"]
         data = cq.get("data")
-        if data == "macros":
-            await do_macros(chat_id)
-        elif data == "menu3":
-            await do_menu3(chat_id)
-        elif data == "help":
-            await tg("sendMessage", {"chat_id": chat_id, "text": USER_GUIDANCE})
+
+        with SessionLocal() as s:
+            u = get_user(s, chat_id) or User(chat_id=str(chat_id))
+
+            if data.startswith("sexo_"):
+                u.sexo = data.split("_",1)[1]; u.onboarding_step = 2
+            elif data.startswith("act_"):
+                u.actividad = data.split("_",1)[1]; u.onboarding_step = 6
+            elif data.startswith("obj_"):
+                # map objetivos detallados
+                mapping = {
+                    "grasa":"perder grasa","musculo":"ganar músculo","abdomen":"definir abdomen",
+                    "mente":"mente tranquila","keto":"desinflamar","cardio":"mejorar cardio",
+                    "energia":"subir energía","sueno":"dormir mejor"
+                }
+                key = data.split("_",1)[1]
+                u.objetivo_detallado = mapping.get(key, key); u.onboarding_step = 7
+            elif data.startswith("dieta_"):
+                u.estilo_dieta = data.split("_",1)[1]; u.onboarding_step = 8
+            elif data.startswith("cook_"):
+                mapping = {"15":"≤15","30":"~30","45":">45"}
+                key = data.split("_",1)[1]
+                u.tiempo_cocina = mapping.get(key, key); u.onboarding_step = 11
+            elif data.startswith("equip_"):
+                eq = data.split("_",1)[1]
+                u.equipamiento = eq if eq != "none" else "ninguno"; u.onboarding_step = 12
+
+            s.add(u); s.commit()
+
+        await ask_next(chat_id)
         await tg("answerCallbackQuery", {"callback_query_id": cq["id"]})
 
     return PlainTextResponse("ok")
 
 @app.on_event("startup")
 async def set_webhook():
-    if not PUBLIC_BASE_URL: return
+    if not PUBLIC_BASE_URL or not TELEGRAM_BOT_TOKEN:
+        return
     await tg("setWebhook", {
         "url": PUBLIC_BASE_URL + "/telegram/webhook",
         "secret_token": WEBHOOK_SECRET or None,
