@@ -1,0 +1,4 @@
+# Ignorar archivos con secretos
+.env
+*.env*
+NutriCoach.env
