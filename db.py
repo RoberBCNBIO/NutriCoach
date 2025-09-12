@@ -16,6 +16,7 @@ class User(Base):
     edad = Column(Integer, nullable=True)
     altura_cm = Column(Integer, nullable=True)
     peso_kg = Column(Float, nullable=True)
+    actividad = Column(String, nullable=True)       # 🔹 Faltaba: sedentario, ligero, etc.
 
     # Plan nutricional
     objetivo_detallado = Column(String, default="perder grasa")  
