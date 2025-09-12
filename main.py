@@ -48,28 +48,34 @@ async def handle_onboarding_text(chat_id: str, text: str):
             return await start_onboarding(chat_id)
 
         step = u.onboarding_step or 1
-        t = text.strip()
+        raw = text.strip()
 
         try:
             if step == 2:   # edad
-                u.edad = int(t)
+                u.edad = int(raw)
             elif step == 3: # altura
-                u.altura_cm = int(float(t))
+                u.altura_cm = int(float(raw.replace(",", ".")))
             elif step == 4: # peso
-                u.peso_kg = float(t.replace(",", "."))
+                cleaned = raw.replace(",", ".")
+                u.peso_kg = round(float(cleaned), 1)  # ✅ acepta enteros y decimales
             elif step == 8: # no_gustos
-                u.no_gustos = t
+                u.no_gustos = raw
             elif step == 9: # alergias
-                u.alergias = t
+                u.alergias = raw
             elif step == 12: # duración plan
-                u.duracion_plan_semanas = int(t)
+                u.duracion_plan_semanas = int(raw)
             else:
                 return await ask_next(chat_id)
 
             u.onboarding_step = step + 1
-            s.add(u); s.commit()
+            s.add(u)
+            s.commit()
+
         except Exception:
-            return await tg("sendMessage", {"chat_id": chat_id, "text": "⚠️ Formato no válido. Intenta de nuevo."})
+            return await tg("sendMessage", {
+                "chat_id": chat_id,
+                "text": "⚠️ No he podido entender el número. Escribe solo cifras, ej: 70 o 70.5"
+            })
 
     await ask_next(chat_id)
 
