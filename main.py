@@ -42,6 +42,7 @@ def get_user(session, chat_id: str) -> User | None:
 
 async def handle_onboarding_text(chat_id: str, text: str):
     """Procesa respuestas libres en el onboarding"""
+    import re
     with SessionLocal() as s:
         u = get_user(s, chat_id)
         if not u:
@@ -54,10 +55,13 @@ async def handle_onboarding_text(chat_id: str, text: str):
             if step == 2:   # edad
                 u.edad = int(raw)
             elif step == 3: # altura
-                u.altura_cm = int(float(raw.replace(",", ".")))
+                cleaned = re.sub(r"[^0-9.,]", "", raw)
+                u.altura_cm = int(float(cleaned.replace(",", ".")))
             elif step == 4: # peso
-                cleaned = raw.replace(",", ".")
-                u.peso_kg = round(float(cleaned), 1)  # ✅ acepta enteros y decimales
+                cleaned = re.sub(r"[^0-9.,]", "", raw)
+                if not cleaned:
+                    raise ValueError("peso vacío")
+                u.peso_kg = round(float(cleaned.replace(",", ".")), 1)
             elif step == 8: # no_gustos
                 u.no_gustos = raw
             elif step == 9: # alergias
@@ -71,13 +75,14 @@ async def handle_onboarding_text(chat_id: str, text: str):
             s.add(u)
             s.commit()
 
-        except Exception:
+        except Exception as e:
             return await tg("sendMessage", {
                 "chat_id": chat_id,
                 "text": "⚠️ No he podido entender el número. Escribe solo cifras, ej: 70 o 70.5"
             })
 
     await ask_next(chat_id)
+
 
 # ---------- Endpoints ----------
 @app.get("/health")
