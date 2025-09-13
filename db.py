@@ -1,75 +1,61 @@
+# db.py
+
 import os
-from sqlalchemy import Column, Integer, String, Float, Text, Date, JSON, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.sql import func
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, create_engine
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+
+# Configuración base
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://user:password@localhost:5432/dietabot")
 
 Base = declarative_base()
 
+
+# ---------- MODELOS ----------
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
+
+    id = Column(Integer, primary_key=True, index=True)
     chat_id = Column(String, unique=True, index=True)
 
-    # Datos básicos
     nombre = Column(String, nullable=True)
-    sexo = Column(String, nullable=True)            # "M", "F", "ND"
+    sexo = Column(String, nullable=True)
     edad = Column(Integer, nullable=True)
-    altura_cm = Column(Integer, nullable=True)
+    altura_cm = Column(Float, nullable=True)
     peso_kg = Column(Float, nullable=True)
-    actividad = Column(String, nullable=True)       # 🔹 Faltaba: sedentario, ligero, etc.
-
-    # Plan nutricional
-    objetivo_detallado = Column(String, default="perder grasa")  
-    # ej: "perder grasa", "ganar músculo", "definir abdomen", "mente tranquila", "desinflamación"
-    estilo_dieta = Column(String, default="mediterránea")  
-    # ej: "mediterránea", "japonesa", "vegana"…
-    preferencias = Column(Text, default="")         # comidas favoritas
-    no_gustos = Column(Text, default="")            # comidas que no le gustan
-    alergias = Column(Text, default="")
-    vetos = Column(Text, default="")                # cosas que nunca quiere
-    tiempo_cocina = Column(String, default="30min") # "<15", "30", ">45"
-    equipamiento = Column(Text, default="")         # horno, airfryer, etc.
-
-    # Plan activo
-    duracion_plan_semanas = Column(Integer, default=8)
+    actividad = Column(String, nullable=True)
+    objetivo_detallado = Column(String, nullable=True)
+    estilo_dieta = Column(String, nullable=True)
+    preferencias = Column(String, nullable=True)
+    no_gustos = Column(String, nullable=True)
+    alergias = Column(String, nullable=True)
+    vetos = Column(String, nullable=True)
+    tiempo_cocina = Column(String, nullable=True)
+    equipamiento = Column(String, nullable=True)
+    duracion_plan_semanas = Column(Integer, nullable=True)
     semana_actual = Column(Integer, default=1)
-    kcal_objetivo = Column(Integer, default=2000)
-    macros = Column(JSON, default={})               # {proteinas, grasas, carbohidratos}
-    menu_activo = Column(JSON, default={})          # calendario de dieta vigente
-
-    # Seguimiento interno
-    onboarding_step = Column(Integer, default=0)
-    pais = Column(String, default="ES")
-
-
-class CheckIn(Base):
-    __tablename__ = "checkins"
-    id = Column(Integer, primary_key=True)
-    chat_id = Column(String, index=True)
-    fecha = Column(Date, server_default=func.current_date())
-    hambre = Column(Integer)        # 1-5
-    energia = Column(Integer)       # 1-5
-    peso_kg = Column(Float, nullable=True)
-    notas = Column(Text, default="")
+    kcal_objetivo = Column(Integer, nullable=True)
+    macros = Column(String, nullable=True)         # JSON como texto
+    menu_activo = Column(String, nullable=True)    # JSON como texto
+    onboarding_step = Column(Integer, default=1)
+    pais = Column(String, nullable=True)
 
 
 class MenuLog(Base):
     __tablename__ = "menulogs"
-    id = Column(Integer, primary_key=True)
+
+    id = Column(Integer, primary_key=True, index=True)
     chat_id = Column(String, index=True)
-    params = Column(JSON)           # ej. {"kcal": 1900}
-    menu_json = Column(JSON)        # menú generado (3 días)
+    params = Column(String, nullable=True)       # JSON de parámetros como texto
+    menu_json = Column(String, nullable=True)    # JSON del menú como texto
+    timestamp = Column(DateTime, default=datetime.utcnow)
 
 
-# --- Base de datos ---
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "sqlite:///./nutricoach.db"  # fallback local
-)
+# ---------- CONEXIÓN ----------
+engine = create_engine(DATABASE_URL, echo=False)
 
-engine = create_engine(DATABASE_URL, echo=False, future=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 
 def init_db():
-    """Crea las tablas en la base de datos si no existen."""
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(bind=engine)
