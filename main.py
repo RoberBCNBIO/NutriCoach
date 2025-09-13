@@ -175,21 +175,27 @@ País: {u.pais}
 """
                 return await tg("sendMessage", {"chat_id": chat_id, "text": help_txt, "parse_mode": "HTML"})
 
-        # --- CHAT LIBRE ---
-        if u and u.vetos == "__chat__" and not is_callback and text and not text.startswith("/"):
-            client = openai.OpenAI(api_key=OPENAI_API_KEY)
-            completion = client.chat.completions.create(
-                model=OPENAI_MODEL,
-                temperature=OPENAI_TEMPERATURE,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": text + "\n\n" + COACH_STYLE_SUFFIX}
-                ]
-            )
-            answer = completion.choices[0].message.content
-            return await tg("sendMessage", {"chat_id": chat_id, "text": answer})
-
-    return await tg("sendMessage", {"chat_id": chat_id, "text": "No entiendo ese comando. Usa /start para comenzar."})
+       # --- CHAT LIBRE (natural) ---
+if u and u.vetos == "__chat__" and not is_callback and text and not text.startswith("/"):
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    completion = client.chat.completions.create(
+        model=OPENAI_MODEL,
+        temperature=OPENAI_TEMPERATURE,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Eres un coach nutricional cercano, simpático y natural. "
+                    "Responde de forma conversacional, breve si procede, como si chatearas en Telegram. "
+                    "No uses estructuras rígidas ni listas largas salvo que el usuario las pida explícitamente."
+		    "Pon en contexto los datos del usuario y de la dieta propuesta , o la lista de la compra. Este contexto es importante ya que puede que el usuario haga preguntas o pida recomendaciones al respecto."
+                )
+            },
+            {"role": "user", "content": text}
+        ]
+    )
+    answer = completion.choices[0].message.content
+    return await tg("sendMessage", {"chat_id": chat_id, "text": answer})
 
 
 @app.get("/health")
