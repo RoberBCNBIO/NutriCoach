@@ -1,7 +1,7 @@
 # onboarding.py
 
 from db import SessionLocal, User
-from telegram_utils import tg   # ahora limpio, sin circular import
+from telegram_utils import tg   # limpio, sin import circular
 
 # --- Teclados de opciones ---
 def kb_sexo():
@@ -124,7 +124,7 @@ async def ask_next(chat_id: str):
             return await tg("sendMessage", {"chat_id": chat_id, "text": "¿Qué equipamiento tienes?", "reply_markup": kb_equipamiento()})
 
         if step == 14 and not u.duracion_plan_semanas:
-            return await tg("sendMessage", {"chat_id": chat_id, "text": "¿Cuántas semanas quieres que dure tu plan?"})
+            return await tg("sendMessage", {"chat_id": chat_id, "text": "¿Cuántas semanas quieres que dure tu plan? (solo número)"})
 
         if step == 15 and not u.pais:
             return await tg("sendMessage", {"chat_id": chat_id, "text": "¿En qué país vives? (sirve para ajustar recetas e ingredientes)"})
@@ -135,7 +135,6 @@ async def ask_next(chat_id: str):
     await tg("sendMessage", {"chat_id": chat_id, "text": "🎉 ¡Perfil completo! Ya puedes ver tu plan actual, generar tu dieta y registrar tu progreso."})
 
 
-# --- Guardar respuesta ---
 async def save_answer(chat_id: str, field: str, value: str):
     """Guarda la respuesta en la DB y avanza al siguiente step"""
     with SessionLocal() as s:
