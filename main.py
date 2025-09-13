@@ -57,10 +57,10 @@ async def telegram_webhook(request: Request):
         return PlainTextResponse("no chat_id")
 
     # --- Comandos ---
-    if text == "/start":
+    if text and text.startswith("/start"):
         return await start_onboarding(chat_id)
 
-    if text == "/reset":
+    if text and text.startswith("/reset"):
         with SessionLocal() as s:
             u = s.query(User).filter(User.chat_id == str(chat_id)).first()
             if u:
@@ -68,19 +68,17 @@ async def telegram_webhook(request: Request):
                 s.commit()
         return await start_onboarding(chat_id)
 
-    if text == "/menu" or text == "/macros":
+    if text and (text.startswith("/menu") or text.startswith("/macros")):
         with SessionLocal() as s:
             u = s.query(User).filter(User.chat_id == str(chat_id)).first()
             if not u or u.onboarding_step != 0:
                 return await ask_next(chat_id)
-        # aquí iría la lógica real de /menu o /macros
         return await tg("sendMessage", {"chat_id": chat_id, "text": f"📊 Aquí iría tu respuesta de {text}."})
 
-    # --- Onboarding (respuestas normales) ---
+    # --- Onboarding (respuestas normales o botones) ---
     with SessionLocal() as s:
         u = s.query(User).filter(User.chat_id == str(chat_id)).first()
         if u and u.onboarding_step != 0:
-            # determinar qué campo toca
             step = u.onboarding_step
             field_map = {
                 1: "sexo",
@@ -99,9 +97,18 @@ async def telegram_webhook(request: Request):
                 14: "duracion_plan_semanas",
                 15: "pais",
             }
+
             field = field_map.get(step)
             if field:
-                await save_answer(chat_id, field, text)
+                # Si viene de callback_data, procesamos el valor
+                if callback:
+                    # Guardamos solo el valor limpio (ej: "sexo_F" -> "F")
+                    value = text
+                    if "_" in text:
+                        value = text.split("_", 1)[-1]
+                    await save_answer(chat_id, field, value)
+                else:
+                    await save_answer(chat_id, field, text)
 
             return await ask_next(chat_id)
 
