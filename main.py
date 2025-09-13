@@ -21,6 +21,21 @@ app = FastAPI()
 init_db()
 
 
+# ---------- Configurar webhook al arrancar ----------
+@app.on_event("startup")
+async def startup_event():
+    if TELEGRAM_BOT_TOKEN and PUBLIC_BASE_URL:
+        webhook_url = f"{PUBLIC_BASE_URL.rstrip('/')}/webhook"
+        api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook"
+        async with httpx.AsyncClient(timeout=10) as client:
+            try:
+                r = await client.post(api_url, json={"url": webhook_url})
+                r.raise_for_status()
+                print("✅ Webhook configurado:", r.json())
+            except Exception as e:
+                print("❌ Error configurando webhook:", e)
+
+
 # ---------- Webhook principal ----------
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
