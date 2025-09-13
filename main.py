@@ -7,7 +7,7 @@ from fastapi.responses import PlainTextResponse
 
 from db import init_db, SessionLocal, User
 from onboarding import start_onboarding, ask_next, save_answer
-from telegram_utils import tg
+from telegram_utils import tg, answer_callback
 
 load_dotenv()
 
@@ -102,12 +102,12 @@ async def telegram_webhook(request: Request):
             if field:
                 if callback:  # viene de inline keyboard
                     raw_value = text
+                    # limpiar: "sexo_F" -> "F", "actividad_ligero" -> "ligero"
                     if "_" in raw_value:
                         raw_value = raw_value.split("_", 1)[-1]
                     await save_answer(chat_id, field, raw_value)
-
-                    # responder al callback para quitar el "loading" en Telegram
-                    await tg("answerCallbackQuery", {"callback_query_id": callback["id"]})
+                    # responder al callback para quitar el "loading"
+                    await answer_callback(callback["id"])
                 else:  # respuesta escrita
                     await save_answer(chat_id, field, text)
 
