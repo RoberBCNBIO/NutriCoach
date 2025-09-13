@@ -182,9 +182,14 @@ País: {u.pais}
                                 dieta_txt = f"\nDieta actual (resumen):\n{str(last_menu.menu_json)[:500]}..."
                         except Exception as e:
                             print("[WARN] No se pudo recuperar dieta:", e)
+                            s.rollback()  # 🔑 limpiamos la transacción
 
                         u.preferencias = perfil_txt + dieta_txt
-                        s.commit()
+                        try:
+                            s.commit()
+                        except Exception as e:
+                            print("[ERROR] Falló commit en menu_chat:", e)
+                            s.rollback()
 
                 return await tg("sendMessage", {
                     "chat_id": chat_id,
