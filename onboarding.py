@@ -58,6 +58,11 @@ def kb_equipamiento():
         [{"text":"Ninguno","callback_data":"equip_none"}]
     ]}
 
+def kb_reset_confirm():
+    return {"inline_keyboard":[
+        [{"text":"✅ Sí, sobrescribir","callback_data":"reset_yes"}],
+        [{"text":"❌ No, mantener perfil","callback_data":"reset_no"}]
+    ]}
 
 # --- Flujo de preguntas ---
 async def start_onboarding(chat_id: str):
@@ -73,7 +78,6 @@ async def start_onboarding(chat_id: str):
         "text": "¡Hola! Soy tu coach nutricional 🤖🥗. Vamos a configurar tu perfil paso a paso.\n\nPrimero: ¿Cuál es tu sexo?",
         "reply_markup": kb_sexo()
     })
-
 
 async def ask_next(chat_id: str):
     """Decide la siguiente pregunta según el step"""
@@ -134,7 +138,6 @@ async def ask_next(chat_id: str):
         s.commit()
     await tg("sendMessage", {"chat_id": chat_id, "text": "🎉 ¡Perfil completo! Ya puedes ver tu plan actual, generar tu dieta y registrar tu progreso."})
 
-
 async def save_answer(chat_id: str, field: str, value: str):
     """Guarda la respuesta en la DB y avanza al siguiente step"""
     with SessionLocal() as s:
@@ -142,9 +145,8 @@ async def save_answer(chat_id: str, field: str, value: str):
         if not u:
             return
         setattr(u, field, value)
-        # avanzar step
         if u.onboarding_step and u.onboarding_step < 15:
             u.onboarding_step += 1
         else:
-            u.onboarding_step = 0  # completado
+            u.onboarding_step = 0
         s.commit()
