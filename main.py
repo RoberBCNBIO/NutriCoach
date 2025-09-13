@@ -188,13 +188,11 @@ País: {u.pais}
                     print("[ERROR] JSON inválido:", e)
                     parsed = {}
 
-                dieta_json = json.dumps(parsed, ensure_ascii=False)
-
-                # Guardar en DB
+                # Guardar en DB (como dict, no string)
                 log = MenuLog(
                     chat_id=str(chat_id),
                     params=perfil_txt,
-                    menu_json=dieta_json,
+                    menu_json=parsed,
                     timestamp=datetime.utcnow()
                 )
                 s.add(log)
@@ -247,7 +245,7 @@ País: {u2.pais}
                         try:
                             last_menu = s2.query(MenuLog).order_by(MenuLog.timestamp.desc()).first()
                             if last_menu and getattr(last_menu, "menu_json", None):
-                                dieta_txt = f"\nDieta actual (resumen):\n{last_menu.menu_json[:500]}..."
+                                dieta_txt = f"\nDieta actual (resumen):\n{json.dumps(last_menu.menu_json)[:500]}..."
                         except Exception as e:
                             print("[WARN] No se pudo recuperar dieta:", e)
                             s2.rollback()
