@@ -8,7 +8,6 @@ from fastapi.responses import PlainTextResponse
 from db import init_db, SessionLocal, User, MenuLog
 from onboarding import start_onboarding, ask_next, save_answer, kb_reset_confirm, kb_main_menu
 from telegram_utils import tg, answer_callback
-from prompts import SYSTEM_PROMPT, COACH_STYLE_SUFFIX
 
 load_dotenv()
 
@@ -156,7 +155,7 @@ País: {u.pais}
 """
                 return await tg("sendMessage", {"chat_id": chat_id, "text": perfil_txt, "parse_mode": "HTML"})
             if text == "menu_chat":
-                # Guardamos modo chat y construimos contexto (perfil + dieta)
+                # Guardamos modo chat y construimos contexto (perfil + dieta si existe)
                 with SessionLocal() as s:
                     u = s.query(User).filter(User.chat_id == str(chat_id)).first()
                     if u:
@@ -176,17 +175,20 @@ Semanas plan: {u.duracion_plan_semanas}
 País: {u.pais}
 """
 
-                        last_menu = s.query(MenuLog).filter(MenuLog.user_id == u.id).order_by(MenuLog.created_at.desc()).first()
                         dieta_txt = ""
-                        if last_menu:
-                            dieta_txt = f"\nDieta actual (resumen):\n{last_menu.menu_json[:500]}..."
+                        try:
+                            last_menu = s.query(MenuLog).first()
+                            if last_menu and getattr(last_menu, "menu_json", None):
+                                dieta_txt = f"\nDieta actual (resumen):\n{str(last_menu.menu_json)[:500]}..."
+                        except Exception as e:
+                            print("[WARN] No se pudo recuperar dieta:", e)
 
                         u.preferencias = perfil_txt + dieta_txt
                         s.commit()
 
                 return await tg("sendMessage", {
                     "chat_id": chat_id,
-                    "text": "💬 Estoy listo para chatear contigo teniendo en cuenta tu perfil y tu dieta actual. Escríbeme lo que quieras sobre recetas, listas o ajustes. (Escribe /menu para volver al menú)"
+                    "text": "💬 Estoy listo para chatear contigo teniendo en cuenta tu perfil y (si existe) tu dieta actual. Escríbeme lo que quieras sobre recetas, listas o ajustes. (Escribe /menu para volver al menú)"
                 })
             if text == "menu_help":
                 help_txt = """❓ <b>Ayuda</b>
@@ -200,7 +202,7 @@ País: {u.pais}
 """
                 return await tg("sendMessage", {"chat_id": chat_id, "text": help_txt, "parse_mode": "HTML"})
 
-        # --- CHAT LIBRE (natural con perfil + dieta) ---
+        # --- CHAT LIBRE (natural con perfil + dieta si existe) ---
         if u and u.vetos == "__chat__" and not is_callback and text and not text.startswith("/"):
             context = u.preferencias or ""
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
