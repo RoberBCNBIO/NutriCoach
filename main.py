@@ -1,6 +1,6 @@
 # main.py
 
-import os, httpx, openai
+import os, httpx, openai, json, re
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
@@ -160,15 +160,35 @@ País: {u.pais}
                         {
                             "role": "system",
                             "content": (
-                                "Eres un nutricionista experto. Genera un plan de dieta estructurado en JSON, "
-                                "dividido por semanas y días, con comidas (desayuno, almuerzo, cena, snacks) "
-                                "y cantidades aproximadas. El JSON debe ser válido y compacto."
+                                "Eres un nutricionista experto. "
+                                "Debes responder ÚNICAMENTE con un JSON válido, sin texto adicional. "
+                                "Formato esperado:\n\n"
+                                "{\n"
+                                '  \"duracion_semanas\": <int>,\n'
+                                '  \"semanas\": [ { \"semana\": 1, \"dias\": { \"lunes\": { \"desayuno\": {\"comida\":..., \"cantidad\":...}, ... } } } ]\n'
+                                "}"
                             )
                         },
-                        {"role": "user", "content": f"Genera una dieta según este perfil:\n{perfil_txt}"}
+                        {"role": "user", "content": f"Genera una dieta en JSON según este perfil:\n{perfil_txt}"}
                     ]
                 )
-                dieta_json = completion.choices[0].message.content
+                raw_text = completion.choices[0].message.content.strip()
+
+                # Extraer solo JSON
+                match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+                if match:
+                    dieta_json = match.group(0)
+                else:
+                    dieta_json = "{}"
+
+                # Validar JSON
+                try:
+                    parsed = json.loads(dieta_json)
+                except Exception as e:
+                    print("[ERROR] JSON inválido:", e)
+                    parsed = {}
+
+                dieta_json = json.dumps(parsed, ensure_ascii=False)
 
                 # Guardar en DB
                 log = MenuLog(
@@ -227,7 +247,7 @@ País: {u2.pais}
                         try:
                             last_menu = s2.query(MenuLog).order_by(MenuLog.timestamp.desc()).first()
                             if last_menu and getattr(last_menu, "menu_json", None):
-                                dieta_txt = f"\nDieta actual (resumen):\n{str(last_menu.menu_json)[:500]}..."
+                                dieta_txt = f"\nDieta actual (resumen):\n{last_menu.menu_json[:500]}..."
                         except Exception as e:
                             print("[WARN] No se pudo recuperar dieta:", e)
                             s2.rollback()
