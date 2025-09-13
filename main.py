@@ -4,6 +4,7 @@ import os, httpx, openai
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
+from datetime import datetime
 
 from db import init_db, SessionLocal, User, MenuLog
 from onboarding import start_onboarding, ask_next, save_answer, kb_reset_confirm, kb_main_menu
@@ -136,7 +137,54 @@ async def telegram_webhook(request: Request):
         if is_callback and text.startswith("menu_"):
             await answer_callback(callback["id"])
             if text == "menu_generate":
-                return await tg("sendMessage", {"chat_id": chat_id, "text": "📅 (Aquí generaremos tu dieta completa semana a semana)"})
+                # Recuperar perfil
+                perfil_txt = f"""
+Sexo: {u.sexo}
+Edad: {u.edad}
+Altura: {u.altura_cm} cm
+Peso: {u.peso_kg} kg
+Actividad: {u.actividad}
+Objetivos: {u.objetivo_detallado}
+Estilos: {u.estilo_dieta}
+Equipamiento: {u.equipamiento}
+Semanas plan: {u.duracion_plan_semanas}
+País: {u.pais}
+"""
+
+                # Generar dieta con OpenAI
+                client = openai.OpenAI(api_key=OPENAI_API_KEY)
+                completion = client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    temperature=OPENAI_TEMPERATURE,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Eres un nutricionista experto. Genera un plan de dieta estructurado en JSON, "
+                                "dividido por semanas y días, con comidas (desayuno, almuerzo, cena, snacks) "
+                                "y cantidades aproximadas. El JSON debe ser válido y compacto."
+                            )
+                        },
+                        {"role": "user", "content": f"Genera una dieta según este perfil:\n{perfil_txt}"}
+                    ]
+                )
+                dieta_json = completion.choices[0].message.content
+
+                # Guardar en DB
+                log = MenuLog(
+                    chat_id=str(chat_id),
+                    params=perfil_txt,
+                    menu_json=dieta_json,
+                    timestamp=datetime.utcnow()
+                )
+                s.add(log)
+                s.commit()
+
+                return await tg("sendMessage", {
+                    "chat_id": chat_id,
+                    "text": "📅 Tu dieta completa ha sido generada y guardada. Ahora puedes consultarla en el chat libre o pedirme la lista de la compra."
+                })
+
             if text == "menu_shopping":
                 return await tg("sendMessage", {"chat_id": chat_id, "text": "🛒 (Aquí generaremos tu lista de la compra)"})
             if text == "menu_profile":
@@ -156,40 +204,40 @@ País: {u.pais}
                 return await tg("sendMessage", {"chat_id": chat_id, "text": perfil_txt, "parse_mode": "HTML"})
             if text == "menu_chat":
                 # Guardamos modo chat y construimos contexto (perfil + dieta si existe)
-                with SessionLocal() as s:
-                    u = s.query(User).filter(User.chat_id == str(chat_id)).first()
-                    if u:
-                        u.vetos = "__chat__"
+                with SessionLocal() as s2:
+                    u2 = s2.query(User).filter(User.chat_id == str(chat_id)).first()
+                    if u2:
+                        u2.vetos = "__chat__"
 
                         perfil_txt = f"""
 Perfil usuario:
-Sexo: {u.sexo}
-Edad: {u.edad}
-Altura: {u.altura_cm} cm
-Peso: {u.peso_kg} kg
-Actividad: {u.actividad}
-Objetivos: {u.objetivo_detallado}
-Estilos: {u.estilo_dieta}
-Equipamiento: {u.equipamiento}
-Semanas plan: {u.duracion_plan_semanas}
-País: {u.pais}
+Sexo: {u2.sexo}
+Edad: {u2.edad}
+Altura: {u2.altura_cm} cm
+Peso: {u2.peso_kg} kg
+Actividad: {u2.actividad}
+Objetivos: {u2.objetivo_detallado}
+Estilos: {u2.estilo_dieta}
+Equipamiento: {u2.equipamiento}
+Semanas plan: {u2.duracion_plan_semanas}
+País: {u2.pais}
 """
 
                         dieta_txt = ""
                         try:
-                            last_menu = s.query(MenuLog).first()
+                            last_menu = s2.query(MenuLog).order_by(MenuLog.timestamp.desc()).first()
                             if last_menu and getattr(last_menu, "menu_json", None):
                                 dieta_txt = f"\nDieta actual (resumen):\n{str(last_menu.menu_json)[:500]}..."
                         except Exception as e:
                             print("[WARN] No se pudo recuperar dieta:", e)
-                            s.rollback()  # 🔑 limpiamos la transacción
+                            s2.rollback()
 
-                        u.preferencias = perfil_txt + dieta_txt
+                        u2.preferencias = perfil_txt + dieta_txt
                         try:
-                            s.commit()
+                            s2.commit()
                         except Exception as e:
                             print("[ERROR] Falló commit en menu_chat:", e)
-                            s.rollback()
+                            s2.rollback()
 
                 return await tg("sendMessage", {
                     "chat_id": chat_id,
@@ -208,7 +256,7 @@ País: {u.pais}
                 return await tg("sendMessage", {"chat_id": chat_id, "text": help_txt, "parse_mode": "HTML"})
 
         # --- CHAT LIBRE (natural con perfil + dieta si existe) ---
-        if u and u.vetos == "__chat__" and not is_callback and text and not text.startswith("/"):
+        if u and u.vetos == "__chat__" and not is_callback and text:
             context = u.preferencias or ""
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
             completion = client.chat.completions.create(
