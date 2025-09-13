@@ -92,3 +92,9 @@ async def telegram_webhook(request: Request):
 
     # Si llega aquí y no es onboarding
     return await tg("sendMessage", {"chat_id": chat_id, "text": "No entiendo ese comando. Usa /start para comenzar."})
+
+
+# ---------- Health check ----------
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
