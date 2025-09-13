@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-from db import init_db, SessionLocal, User
+from db import init_db, SessionLocal, User, MenuLog
 from onboarding import start_onboarding, ask_next, save_answer, kb_reset_confirm, kb_main_menu
 from telegram_utils import tg, answer_callback
 from prompts import SYSTEM_PROMPT, COACH_STYLE_SUFFIX
@@ -156,12 +156,38 @@ País: {u.pais}
 """
                 return await tg("sendMessage", {"chat_id": chat_id, "text": perfil_txt, "parse_mode": "HTML"})
             if text == "menu_chat":
+                # Guardamos modo chat y construimos contexto (perfil + dieta)
                 with SessionLocal() as s:
                     u = s.query(User).filter(User.chat_id == str(chat_id)).first()
                     if u:
                         u.vetos = "__chat__"
+
+                        perfil_txt = f"""
+Perfil usuario:
+Sexo: {u.sexo}
+Edad: {u.edad}
+Altura: {u.altura_cm} cm
+Peso: {u.peso_kg} kg
+Actividad: {u.actividad}
+Objetivos: {u.objetivo_detallado}
+Estilos: {u.estilo_dieta}
+Equipamiento: {u.equipamiento}
+Semanas plan: {u.duracion_plan_semanas}
+País: {u.pais}
+"""
+
+                        last_menu = s.query(MenuLog).filter(MenuLog.user_id == u.id).order_by(MenuLog.created_at.desc()).first()
+                        dieta_txt = ""
+                        if last_menu:
+                            dieta_txt = f"\nDieta actual (resumen):\n{last_menu.menu_json[:500]}..."
+
+                        u.preferencias = perfil_txt + dieta_txt
                         s.commit()
-                return await tg("sendMessage", {"chat_id": chat_id, "text": "💬 Estoy listo para chatear contigo. Escríbeme lo que quieras sobre recetas, listas o dieta. (Escribe /menu para volver al menú)"})
+
+                return await tg("sendMessage", {
+                    "chat_id": chat_id,
+                    "text": "💬 Estoy listo para chatear contigo teniendo en cuenta tu perfil y tu dieta actual. Escríbeme lo que quieras sobre recetas, listas o ajustes. (Escribe /menu para volver al menú)"
+                })
             if text == "menu_help":
                 help_txt = """❓ <b>Ayuda</b>
 
@@ -174,8 +200,9 @@ País: {u.pais}
 """
                 return await tg("sendMessage", {"chat_id": chat_id, "text": help_txt, "parse_mode": "HTML"})
 
-        # --- CHAT LIBRE (natural) ---
+        # --- CHAT LIBRE (natural con perfil + dieta) ---
         if u and u.vetos == "__chat__" and not is_callback and text and not text.startswith("/"):
+            context = u.preferencias or ""
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
             completion = client.chat.completions.create(
                 model=OPENAI_MODEL,
@@ -186,7 +213,8 @@ País: {u.pais}
                         "content": (
                             "Eres un coach nutricional cercano, simpático y natural. "
                             "Responde de forma conversacional, breve si procede, como si chatearas en Telegram. "
-                            "No uses estructuras rígidas ni listas largas salvo que el usuario las pida explícitamente."
+                            "Ten siempre en cuenta el siguiente perfil y dieta del usuario:\n\n"
+                            f"{context}"
                         )
                     },
                     {"role": "user", "content": text}
