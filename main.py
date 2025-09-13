@@ -100,14 +100,15 @@ async def telegram_webhook(request: Request):
 
             field = field_map.get(step)
             if field:
-                # Si viene de callback_data, procesamos el valor
-                if callback:
-                    # Guardamos solo el valor limpio (ej: "sexo_F" -> "F")
-                    value = text
-                    if "_" in text:
-                        value = text.split("_", 1)[-1]
-                    await save_answer(chat_id, field, value)
-                else:
+                if callback:  # viene de inline keyboard
+                    raw_value = text
+                    if "_" in raw_value:
+                        raw_value = raw_value.split("_", 1)[-1]
+                    await save_answer(chat_id, field, raw_value)
+
+                    # responder al callback para quitar el "loading" en Telegram
+                    await tg("answerCallbackQuery", {"callback_query_id": callback["id"]})
+                else:  # respuesta escrita
                     await save_answer(chat_id, field, text)
 
             return await ask_next(chat_id)
