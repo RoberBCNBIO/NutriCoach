@@ -2,16 +2,31 @@
 
 import os
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, create_engine
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-# Configuración base
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://user:password@localhost:5432/dietabot")
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    Float,
+    DateTime,
+    ForeignKey,
+    create_engine,
+)
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.mutable import MutableDict
+
+# ---------------- Configuración base ----------------
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+psycopg2://user:password@localhost:5432/dietabot",
+)
 
 Base = declarative_base()
 
 
-# ---------- MODELOS ----------
+# ---------------- MODELOS ----------------
 class User(Base):
     __tablename__ = "users"
 
@@ -35,8 +50,11 @@ class User(Base):
     duracion_plan_semanas = Column(Integer, nullable=True)
     semana_actual = Column(Integer, default=1)
     kcal_objetivo = Column(Integer, nullable=True)
-    macros = Column(String, nullable=True)         # JSON como texto
-    menu_activo = Column(String, nullable=True)    # JSON como texto
+
+    # JSON correctamente tipado como JSONB y con MutableDict para change-tracking
+    macros = Column(MutableDict.as_mutable(JSONB), default=dict, nullable=True)
+    menu_activo = Column(MutableDict.as_mutable(JSONB), default=dict, nullable=True)
+
     onboarding_step = Column(Integer, default=1)
     pais = Column(String, nullable=True)
 
@@ -46,12 +64,15 @@ class MenuLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     chat_id = Column(String, index=True)
-    params = Column(String, nullable=True)       # JSON de parámetros como texto
-    menu_json = Column(String, nullable=True)    # JSON del menú como texto
-    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    # Parámetros y menú guardados como JSONB
+    params = Column(MutableDict.as_mutable(JSONB), default=dict, nullable=True)
+    menu_json = Column(MutableDict.as_mutable(JSONB), default=dict, nullable=True)
+
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
 
-# ---------- CONEXIÓN ----------
+# ---------------- CONEXIÓN ----------------
 engine = create_engine(DATABASE_URL, echo=False)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
