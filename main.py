@@ -7,7 +7,14 @@ from fastapi.responses import PlainTextResponse
 from datetime import datetime
 
 from db import init_db, SessionLocal, User, MenuLog
-from onboarding import start_onboarding, ask_next, save_answer, kb_reset_confirm, kb_main_menu
+from onboarding import (
+    start_onboarding,
+    ask_next,
+    save_answer,
+    kb_reset_confirm,
+    kb_main_menu,
+    handle_callback,   # 👈 nuevo: procesar botones inline de onboarding
+)
 from telegram_utils import tg, answer_callback
 
 load_dotenv()
@@ -122,16 +129,22 @@ async def telegram_webhook(request: Request):
                 15: "pais",
             }
             field = field_map.get(step)
+
+            # 👇 clave: los pasos 1 y 5 se responden con botones inline
+            if is_callback and (text.startswith("sexo_") or text.startswith("act_")):
+                await answer_callback(callback["id"])
+                await handle_callback(chat_id, text)    # deja guardado y avanza de step dentro
+                return await ask_next(chat_id)
+
             if field:
                 if is_callback:
+                    # Si por error llegan callbacks no esperados aquí, solo los descartamos
                     await answer_callback(callback["id"])
-                    raw_value = text
-                    if "_" in raw_value:
-                        raw_value = raw_value.split("_", 1)[-1]
-                    await save_answer(chat_id, field, raw_value)
+                    return await ask_next(chat_id)
                 else:
+                    # Entradas de texto: se validan en save_answer (altura/peso/edad…)
                     await save_answer(chat_id, field, text)
-            return await ask_next(chat_id)
+                    return await ask_next(chat_id)
 
         # --- Menú principal callbacks ---
         if is_callback and text.startswith("menu_"):
@@ -188,10 +201,21 @@ País: {u.pais}
                     print("[ERROR] JSON inválido:", e)
                     parsed = {}
 
-                # Guardar en DB (como dict, no string)
+                # Guardar en DB (JSONB): params como dict para limpieza
                 log = MenuLog(
                     chat_id=str(chat_id),
-                    params=perfil_txt,
+                    params={"perfil": {
+                        "sexo": u.sexo,
+                        "edad": u.edad,
+                        "altura_cm": u.altura_cm,
+                        "peso_kg": u.peso_kg,
+                        "actividad": u.actividad,
+                        "objetivo_detallado": u.objetivo_detallado,
+                        "estilo_dieta": u.estilo_dieta,
+                        "equipamiento": u.equipamiento,
+                        "duracion_plan_semanas": u.duracion_plan_semanas,
+                        "pais": u.pais,
+                    }},
                     menu_json=parsed,
                     timestamp=datetime.utcnow()
                 )
